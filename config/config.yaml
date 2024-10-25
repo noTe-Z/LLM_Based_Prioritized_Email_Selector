@@ -1,0 +1,6 @@
+# config/config.yaml
+microsoft:
+  client_id: "your-client-id"
+  client_secret: "your-client-secret"
+  tenant_id: "your-tenant-id"
+  check_interval: 30  # minutes
