@@ -4,13 +4,22 @@ function isGenAIEmail(email) {
 
   const truncatedBody = email.body.substring(0, 10000); // Truncate if over 10,000 characters
 
-  const prompt = `
+const prompt = `
+Please analyze the following email and determine if it falls into any of these categories:
+1. Academic/Professional Request - requests or questions from professors, recruiters, coworkers, or students
+2. Career Opportunity - job opportunities, applications, offers, interview requests
+3. GenAI News/Opportunities - news, updates, or opportunities related to Generative AI
 
-  The following email may or may not be related to Generative AI. Tell me "yes" if it is related, "no" if it isn't.
+Email Subject: "${email.subject}"
+Email Content: "${truncatedBody}"
 
-  Email content: "${truncatedBody}"
+Respond with ONLY ONE of these exact words:
+- "academic" - if it's category 1
+- "career" - if it's category 2
+- "genai" - if it's category 3
+- "no" - if it doesn't match any category
 
-  `;
+Provide only one word response without explanation or punctuation.`;
 
   const requestData = {
 
