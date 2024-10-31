@@ -1,100 +1,143 @@
-function isGenAIEmail(email) {
-
-  const openAiApiKey = 'YOUR_OPENAI_API_KEY'; // Replace with your OpenAI API key
-
-  const truncatedBody = email.body.substring(0, 10000); // Truncate if over 10,000 characters
-
-const prompt = `
-Please analyze the following email and determine if it falls into any of these categories:
-1. Academic/Professional Request - requests or questions from professors, recruiters, coworkers, or students
-2. Career Opportunity - job opportunities, applications, offers, interview requests
-3. GenAI News/Opportunities - news, updates, or opportunities related to Generative AI
-
-Email Subject: "${email.subject}"
-Email Content: "${truncatedBody}"
-
-Respond with ONLY ONE of these exact words:
-- "academic" - if it's category 1
-- "career" - if it's category 2
-- "genai" - if it's category 3
-- "no" - if it doesn't match any category
-
-Provide only one word response without explanation or punctuation.`;
-
-  const requestData = {
-
-model: "gpt-3.5-turbo",
-
-messages: [
-
-   { "role": "user", "content": prompt }
-
-],
-
-max_tokens: 10,
-
-temperature: 0
-
-  };
-
-  const options = {
-
-method: 'post',
-
-contentType: 'application/json',
-
-headers: {
-
-   'Authorization': Bearer ${openAiApiKey}
-
-},
-
-payload: JSON.stringify(requestData)
-
-  };
-
-  const response = UrlFetchApp.fetch('https://api.openai.com/v1/chat/completions', options);
-
-  const jsonResponse = JSON.parse(response.getContentText());
-
-  const reply = jsonResponse.choices[0].message.content.trim().toLowerCase();
-
-  return reply === 'yes';
-
-}
-
-function checkLatestEmailsForGenAI() {
-
-  const threads = GmailApp.search("newer_than:10d"); // Adjust the search criteria as needed
-
-  const messages = GmailApp.getMessagesForThreads(threads);
-
-  messages.flat().forEach(message => {
-
-const email = {
-
-   subject: message.getSubject(),
-
-   body: message.getPlainBody()
-
+// Configuration object
+const CONFIG = {
+  OPENAI_API_KEY: 'your-api-key-here',
+  TARGET_EMAIL: 'target@gmail.com', // Email address to forward messages to
+  SCAN_INTERVAL: 30, // minutes
+  LABEL_NAME: 'GenAI-Related'
 };
 
-const isRelatedToGenAI = isGenAIEmail(email);
-
-console.log(`Email Subject: "${email.subject}"`);
-
-console.log(`Is related to GenAI: ${isRelatedToGenAI}`);
-
-  });
-
+// Create a trigger to run the script every 30 minutes
+function createTimeDrivenTrigger() {
+  ScriptApp.newTrigger('processNewEmails')
+    .timeBased()
+    .everyMinutes(CONFIG.SCAN_INTERVAL)
+    .create();
 }
 
-  var jsonResponse = JSON.parse(response.getContentText());
+// Main function to process new emails
+function processNewEmails() {
+  // Get emails from the last 30 minutes
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+  const searchQuery = `after:${thirtyMinutesAgo.toISOString()}`;
+  const threads = GmailApp.search(searchQuery);
+  
+  // Create label if it doesn't exist
+  let label = GmailApp.getUserLabelByName(CONFIG.LABEL_NAME);
+  if (!label) {
+    label = GmailApp.createLabel(CONFIG.LABEL_NAME);
+  }
+  
+  for (const thread of threads) {
+    const messages = thread.getMessages();
+    for (const message of messages) {
+      if (isGenAIRelated(message)) {
+        // Forward the email
+        forwardEmail(message);
+        // Label the original email
+        thread.addLabel(label);
+      }
+    }
+  }
+}
 
- 
+// Function to check if an email is GenAI-related using GPT-3.5
+function isGenAIRelated(message) {
+  const subject = message.getSubject();
+  const body = message.getPlainBody();
+  
+  // Prepare content for analysis
+  const contentToAnalyze = `Subject: ${subject}\n\nBody: ${body.substring(0, 1000)}`; // Limit body length
+  
+  // Call GPT-3.5 API
+  const response = callGPT35API(contentToAnalyze);
+  return response.isGenAIRelated;
+}
 
-  // Extract and return GPT's response
+// Function to call GPT-3.5 API
+function callGPT35API(content) {
+  const url = 'https://api.openai.com/v1/chat/completions';
+  const payload = {
+    model: "gpt-3.5-turbo",
+    messages: [
+      {
+        role: "system",
+        content: "You are an AI that determines if an email is related to Generative AI, LLMs, or AI technology. Respond with only 'true' or 'false'."
+      },
+      {
+        role: "user",
+        content: content
+      }
+    ]
+  };
+  
+  const options = {
+    method: 'post',
+    headers: {
+      'Authorization': `Bearer ${CONFIG.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+  
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const json = JSON.parse(response.getContentText());
+    const answer = json.choices[0].message.content.toLowerCase();
+    return { isGenAIRelated: answer === 'true' };
+  } catch (error) {
+    console.error('Error calling GPT-3.5 API:', error);
+    return { isGenAIRelated: false };
+  }
+}
 
-  return jsonResponse.choices[0].text;
+// Function to forward email
+function forwardEmail(message) {
+  const subject = message.getSubject();
+  const body = message.getBody();
+  const from = message.getFrom();
+  
+  // Create forwarded message
+  const forwardedBody = `
+    ---------- Forwarded message ----------
+    From: ${from}
+    Date: ${message.getDate()}
+    Subject: ${subject}
+    
+    ${body}
+  `;
+  
+  // Send email
+  GmailApp.sendEmail(
+    CONFIG.TARGET_EMAIL,
+    `[GenAI] ${subject}`,
+    message.getPlainBody(), // Plain text version
+    {
+      htmlBody: forwardedBody, // HTML version
+      from: Session.getActiveUser().getEmail()
+    }
+  );
+}
 
+// Function to test the setup
+function testSetup() {
+  try {
+    // Test GPT-3.5 API connection
+    const testResponse = callGPT35API("Test email about ChatGPT and LLMs");
+    console.log("API Test Result:", testResponse);
+    
+    // Test label creation
+    const label = GmailApp.getUserLabelByName(CONFIG.LABEL_NAME) || 
+                 GmailApp.createLabel(CONFIG.LABEL_NAME);
+    console.log("Label created/found:", label.getName());
+    
+    // Test trigger creation
+    createTimeDrivenTrigger();
+    console.log("Trigger created successfully");
+    
+    return "Setup test completed successfully";
+  } catch (error) {
+    console.error("Setup test failed:", error);
+    return `Setup test failed: ${error.toString()}`;
+  }
 }
